@@ -73,6 +73,16 @@ jobs:
           p.write_text(src.replace(old, "if false { // iOS 26 satellite API disabled for iOS 15"))
           print("Patched unused iOS 26-only connectivity check")
           PY
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path.home() / ".pub-cache/hosted/pub.dev/device_info_plus-12.4.0/ios/device_info_plus/Sources/device_info_plus/FPPDeviceInfoPlusPlugin.m"
+          src = p.read_text()
+          old = "isiOSAppOnVision = [NSNumber numberWithBool:[info isiOSAppOnVision]];"
+          if src.count(old) != 1:
+              raise SystemExit("Expected iOS 26-only NSProcessInfo method not found")
+          p.write_text(src.replace(old, "isiOSAppOnVision = [NSNumber numberWithBool:NO];"))
+          print("Patched iOS 26 Vision check (always false on iOS 15)")
+          PY
 
       - name: Build app without Apple code signing
         working-directory: localsend/app
