@@ -103,7 +103,8 @@ jobs:
               exit 1
           fi
           if [ -d "$APP/PlugIns" ]; then
-              find "$APP/PlugIns" -name Info.plist -print | while read -r plist; do
+              for plist in "$APP"/PlugIns/*.appex/Info.plist; do
+                  [ -f "$plist" ] || continue
                   echo "Extension: $plist"
                   /usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$plist"
               done
