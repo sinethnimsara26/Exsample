@@ -1,0 +1,103 @@
+name: Build LocalSend iOS 15 TrollStore IPA
+
+on:
+  push:
+    branches:
+      - build/localsend-ios15-trollstore
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-ios-ipa:
+    name: Unsigned iOS ARM64 (LocalSend v1.18.2)
+    runs-on: macos-15
+    timeout-minutes: 100
+    steps:
+      - name: Checkout upstream LocalSend v1.18.2
+        uses: actions/checkout@v4
+        with:
+          repository: localsend/localsend
+          ref: v1.18.2
+          path: localsend
+          persist-credentials: false
+          submodules: false
+
+      - name: Configure iOS 15-compatible Share Extension
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("localsend/app/ios/Runner.xcodeproj/project.pbxproj")
+          data = p.read_text()
+          original = 'IPHONEOS_DEPLOYMENT_TARGET = 16.0;'
+          count = data.count(original)
+          if count < 1:
+              raise SystemExit("Expected iOS 16 ShareExtension settings not found. Review upstream source before continuing.")
+          p.write_text(data.replace(original, 'IPHONEOS_DEPLOYMENT_TARGET = 15.0;'))
+          print(f"Lowered {count} extension deployment target entries to iOS 15.0")
+          PY
+
+      - name: Install Flutter SDK 3.41.9
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.9'
+          channel: stable
+          cache: true
+
+      - name: Configure Rust for iOS arm64
+        shell: bash
+        run: |
+          rustup toolchain install 1.97.1 --profile minimal
+          rustup target add aarch64-apple-ios --toolchain 1.97.1
+          rustup show
+          xcodebuild -version
+          flutter doctor -v
+
+      - name: Resolve Flutter dependencies
+        working-directory: localsend/app
+        shell: bash
+        run: flutter pub get
+
+      - name: Build app without Apple code signing
+        working-directory: localsend/app
+        shell: bash
+        run: flutter build ios --release --no-codesign
+
+      - name: Validate iOS app and package unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$GITHUB_WORKSPACE/localsend/app/build/ios/iphoneos/Runner.app"
+          test -d "$APP"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$APP/Info.plist"
+          lipo -archs "$APP/Runner"
+          if ! lipo -archs "$APP/Runner" | grep -qw arm64; then
+              echo "ERROR: app does not include ARM64 iOS binary"
+              exit 1
+          fi
+          if [ -d "$APP/PlugIns" ]; then
+              find "$APP/PlugIns" -name Info.plist -print | while read -r plist; do
+                  echo "Extension: $plist"
+                  /usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$plist"
+              done
+          fi
+          mkdir -p "$RUNNER_TEMP/localsend-ipa/Payload"
+          ditto "$APP" "$RUNNER_TEMP/localsend-ipa/Payload/Runner.app"
+          (
+              cd "$RUNNER_TEMP/localsend-ipa"
+              zip -qry "$GITHUB_WORKSPACE/LocalSend-v1.18.2-ios15-TrollStore-unsigned.ipa" Payload
+          )
+          unzip -tq "$GITHUB_WORKSPACE/LocalSend-v1.18.2-ios15-TrollStore-unsigned.ipa"
+          ls -lh "$GITHUB_WORKSPACE/LocalSend-v1.18.2-ios15-TrollStore-unsigned.ipa"
+          shasum -a 256 "$GITHUB_WORKSPACE/LocalSend-v1.18.2-ios15-TrollStore-unsigned.ipa"
+
+      - name: Upload IPA for TrollStore (unsigned, experimental)
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalSend-v1.18.2-ios15-TrollStore-unsigned
+          path: LocalSend-v1.18.2-ios15-TrollStore-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
