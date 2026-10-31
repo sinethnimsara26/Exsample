@@ -60,21 +60,18 @@ jobs:
         shell: bash
         run: flutter pub get
 
-      - name: Remove iOS 26-only satellite API from plugin (not used on iOS 15)
+      - name: Patch iOS 26-only API for iOS 15 SDK
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
           p = Path.home() / ".pub-cache/hosted/pub.dev/connectivity_plus-7.3.1/ios/connectivity_plus/Sources/connectivity_plus/PathMonitorConnectivityProvider.swift"
-          old = """      if #available(iOS 26.0, *), path.isUltraConstrained {
-        types.append(.satellite)
-      }
-"""
           src = p.read_text()
+          old = "if #available(iOS 26.0, *), path.isUltraConstrained {"
           if src.count(old) != 1:
-              raise SystemExit("Expected iOS 26-only API usage not found; review the plugin version before proceeding")
-          p.write_text(src.replace(old, "      // iOS 26-only satellite detection omitted: this build targets iOS 15.\n"))
-          print("Removed one iOS 26-only API call from cached connectivity_plus plugin")
+              raise SystemExit("Expected iOS 26-only API usage not found")
+          p.write_text(src.replace(old, "if false { // iOS 26 satellite API disabled for iOS 15"))
+          print("Patched unused iOS 26-only connectivity check")
           PY
 
       - name: Build app without Apple code signing
